@@ -1,0 +1,649 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum EstadoProspecto {
+  NUEVO
+  CONTACTADO
+  COTIZADO
+  GANADO
+  PERDIDO
+}
+
+model Prospecto {
+  id              String          @id @default(cuid())
+  nombre          String
+  empresa         String?
+  email           String?
+  telefono        String?
+  servicioInteres String?
+  mensaje         String?
+  estado          EstadoProspecto @default(NUEVO)
+  notasInternas   String?
+  cliente         Cliente?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([estado])
+}
+
+model Servicio {
+  id          String         @id @default(cuid())
+  slug        String         @unique
+  nombre      String
+  categoria   String
+  descripcion String
+  destacado   Boolean        @default(true)
+  orden       Int            @default(0)
+  activo      Boolean        @default(true)
+  items       ServicioItem[]
+  recetaUsos  RecetaServicio[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([destacado, orden])
+}
+
+model ServicioItem {
+  id         String   @id @default(cuid())
+  servicioId String
+  servicio   Servicio @relation(fields: [servicioId], references: [id], onDelete: Cascade)
+  texto      String
+  orden      Int      @default(0)
+
+  @@index([servicioId])
+}
+
+model Paquete {
+  id                 String        @id @default(cuid())
+  slug               String        @unique
+  nombre             String
+  descripcionAlcance String
+  precioDesde        Decimal?      @db.Decimal(10, 2)
+  notaPrecio         String?
+  destacado          Boolean       @default(false)
+  premium            Boolean       @default(false)
+  orden              Int           @default(0)
+  activo             Boolean       @default(true)
+  items              PaqueteItem[]
+  contratos          Contrato[]
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+}
+
+model PaqueteItem {
+  id        String  @id @default(cuid())
+  paqueteId String
+  paquete   Paquete @relation(fields: [paqueteId], references: [id], onDelete: Cascade)
+  texto     String
+  orden     Int     @default(0)
+
+  @@index([paqueteId])
+}
+
+enum ModalidadContrato {
+  COMPRA
+  SECAAS
+}
+
+enum Periodicidad {
+  MENSUAL
+  TRIMESTRAL
+  ANUAL
+}
+
+enum EstadoContrato {
+  ACTIVO
+  PAUSADO
+  CANCELADO
+}
+
+model Contrato {
+  id              String             @id @default(cuid())
+  clienteId       String?
+  clienteRef      Cliente?           @relation(fields: [clienteId], references: [id])
+  clienteNombre   String
+  clienteEmail    String?
+  clienteTelefono String?
+  paqueteId       String?
+  paquete         Paquete?           @relation(fields: [paqueteId], references: [id])
+  modalidad       ModalidadContrato  @default(COMPRA)
+  montoMensual    Decimal?           @db.Decimal(10, 2)
+  periodicidad    Periodicidad       @default(MENSUAL)
+  proximaFactura  DateTime?
+  estado          EstadoContrato     @default(ACTIVO)
+  notas           String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([estado])
+}
+
+enum RolUsuario {
+  ADMIN
+  TECNICO
+  CLIENTE
+}
+
+model Usuario {
+  id              String     @id @default(cuid())
+  email           String     @unique
+  passwordHash    String
+  nombre          String
+  rol             RolUsuario @default(TECNICO)
+  clienteId       String?
+  cliente         Cliente?   @relation(fields: [clienteId], references: [id])
+  activo          Boolean    @default(true)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  tareasAsignadas Tarea[]    @relation("TecnicoUsuario")
+
+  @@index([rol])
+}
+
+// ---------------------------------------------------------------------------
+// Capa operativa: Clientes, Proyectos/Tareas, Activos de red, Cotizaciones.
+// Modelado sobre el mismo vocabulario que InfraControl (apps/clientes,
+// proyectos, instalaciones, activos, cotizaciones) pero como esquema propio
+// de NetSeg, sin compartir base de datos con InfraControl.
+// ---------------------------------------------------------------------------
+
+model Cliente {
+  id            String   @id @default(cuid())
+  ruc           String   @unique
+  razonSocial   String
+  nombreComercial String?
+  email         String?
+  telefono      String?
+  direccion     String?
+  notas         String?
+  prospectoId   String?  @unique
+  prospecto     Prospecto? @relation(fields: [prospectoId], references: [id])
+  proyectos     Proyecto[]
+  activos       ActivoCliente[]
+  cotizaciones  Cotizacion[]
+  contratos     Contrato[]
+  facturas      Factura[]
+  usuarios      Usuario[]
+  solicitudes   Solicitud[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+enum EstadoProyecto {
+  PLANIFICADO
+  EN_PROGRESO
+  COMPLETADO
+  CANCELADO
+}
+
+model Proyecto {
+  id                 String         @id @default(cuid())
+  clienteId          String
+  cliente            Cliente        @relation(fields: [clienteId], references: [id])
+  nombre             String
+  descripcion        String?
+  estado             EstadoProyecto @default(PLANIFICADO)
+  presupuestoAprobado Decimal?      @db.Decimal(10, 2)
+  margenMetaPct      Decimal?       @db.Decimal(5, 2)
+  fechaInicio        DateTime?
+  fechaFin           DateTime?
+  tareas             Tarea[]
+  activos            ActivoCliente[]
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  @@index([clienteId])
+  @@index([estado])
+}
+
+enum TipoTarea {
+  INSPECCION
+  INSTALACION
+  SOPORTE
+}
+
+enum EstadoTarea {
+  PENDIENTE
+  EN_PROGRESO
+  COMPLETADA
+}
+
+model Tarea {
+  id                  String        @id @default(cuid())
+  proyectoId          String
+  proyecto            Proyecto      @relation(fields: [proyectoId], references: [id], onDelete: Cascade)
+  tipo                TipoTarea
+  titulo              String
+  descripcion         String?
+  tecnicoNombre       String?
+  tecnicoId           String?
+  tecnico             Usuario?      @relation("TecnicoUsuario", fields: [tecnicoId], references: [id])
+  estado              EstadoTarea   @default(PENDIENTE)
+  fechaProgramada     DateTime?
+  costoLiquidacionReal Decimal?     @db.Decimal(10, 2)
+  checklist           ChecklistItem[]
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  @@index([proyectoId])
+  @@index([estado])
+}
+
+enum EstadoChecklist {
+  VERDE
+  AMARILLO
+  ROJO
+}
+
+model ChecklistItem {
+  id          String          @id @default(cuid())
+  tareaId     String
+  tarea       Tarea           @relation(fields: [tareaId], references: [id], onDelete: Cascade)
+  descripcion String
+  estado      EstadoChecklist @default(AMARILLO)
+  notas       String?
+  orden       Int             @default(0)
+
+  @@index([tareaId])
+}
+
+enum EstadoActivo {
+  ACTIVO
+  EN_MANTENIMIENTO
+  DADO_DE_BAJA
+}
+
+model ActivoCliente {
+  id               String       @id @default(cuid())
+  clienteId        String
+  cliente          Cliente      @relation(fields: [clienteId], references: [id])
+  proyectoId       String?
+  proyecto         Proyecto?    @relation(fields: [proyectoId], references: [id])
+  categoria        String
+  nombre           String
+  marca            String?
+  modelo           String?
+  serial           String?
+  ip               String?
+  mac              String?
+  vlan             String?
+  puertoSwitch     String?
+  ubicacion        String?
+  estado           EstadoActivo @default(ACTIVO)
+  fechaInstalacion DateTime?
+  notas            String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  solicitudes      Solicitud[]
+
+  @@index([clienteId])
+  @@index([proyectoId])
+}
+
+enum TipoSolicitud {
+  INSPECCION
+  COTIZACION
+  SOPORTE
+}
+
+enum EstadoSolicitud {
+  NUEVA
+  EN_PROCESO
+  RESUELTA
+  CANCELADA
+}
+
+// Solicitud que un cliente crea desde el portal (/portal) para pedir una
+// inspección, una cotización nueva o soporte técnico. Un Administrador la
+// atiende desde /admin/solicitudes y, si corresponde, la convierte en una
+// Tarea real o una Cotización — nunca se crea nada "oficial" sin que alguien
+// de NetSeg la revise primero.
+model Solicitud {
+  id            String          @id @default(cuid())
+  clienteId     String
+  cliente       Cliente         @relation(fields: [clienteId], references: [id])
+  activoId      String?
+  activo        ActivoCliente?  @relation(fields: [activoId], references: [id])
+  tipo          TipoSolicitud
+  descripcion   String
+  estado        EstadoSolicitud @default(NUEVA)
+  notasInternas String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([clienteId])
+  @@index([estado])
+}
+
+enum EstadoCotizacion {
+  BORRADOR
+  ENVIADA
+  ACEPTADA
+  RECHAZADA
+  VENCIDA
+}
+
+model Cotizacion {
+  id                 String            @id @default(cuid())
+  numero             String
+  version            Int               @default(1)
+  cotizacionOrigenId String?
+  cotizacionOrigen   Cotizacion?       @relation("VersionesCotizacion", fields: [cotizacionOrigenId], references: [id])
+  versiones          Cotizacion[]      @relation("VersionesCotizacion")
+  clienteId          String
+  cliente            Cliente           @relation(fields: [clienteId], references: [id])
+  fecha              DateTime          @default(now())
+  validaHasta        DateTime?
+  ivaPct             Decimal           @default(15) @db.Decimal(5, 2)
+  margenAplicadoPct  Decimal?          @db.Decimal(5, 2)
+  estado             EstadoCotizacion  @default(BORRADOR)
+  // Contenido de la propuesta (ver PDF): resumen ejecutivo, plazo, cronograma Gantt y criterio de cálculo.
+  proyecto           String?
+  ubicacion          String?
+  resumenEjecutivo   String?
+  tiempoEjecucion    String?
+  validezOferta      String?
+  criterioCalculo    String?
+  notasTerminos      String?
+  cronogramaJson     Json?
+  notas              String?
+  lineas             LineaCotizacion[]
+  factura            Factura?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@unique([numero, version])
+  @@index([clienteId])
+  @@index([estado])
+  @@index([cotizacionOrigenId])
+}
+
+model LineaCotizacion {
+  id             String     @id @default(cuid())
+  cotizacionId   String
+  cotizacion     Cotizacion @relation(fields: [cotizacionId], references: [id], onDelete: Cascade)
+  categoria      String?
+  descripcion    String
+  cantidad       Decimal    @db.Decimal(10, 2)
+  unidad         String     @default("u")
+  precioUnitario Decimal    @db.Decimal(10, 2)
+  orden          Int        @default(0)
+
+  @@index([cotizacionId])
+}
+
+// ---------------------------------------------------------------------------
+// Inventario y compras
+// ---------------------------------------------------------------------------
+
+model Proveedor {
+  id        String   @id @default(cuid())
+  nombre    String
+  ruc       String?
+  contacto  String?
+  telefono  String?
+  email     String?
+  notas     String?
+  productos ProductoInventario[]
+  ordenes   OrdenCompra[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum TipoProductoInventario {
+  SIMPLE
+  COMPUESTO
+}
+
+model ProductoInventario {
+  id            String                 @id @default(cuid())
+  nombre        String
+  categoria     String
+  sku           String?                @unique
+  unidad        String                 @default("unidad")
+  tipo          TipoProductoInventario @default(SIMPLE)
+  imagenUrl     String?
+  stockActual   Decimal                @default(0) @db.Decimal(10, 2)
+  stockMinimo   Decimal                @default(0) @db.Decimal(10, 2)
+  costoUnitario Decimal?               @db.Decimal(10, 2)
+  margenPct     Decimal?               @db.Decimal(5, 2)
+  proveedorId   String?
+  proveedor     Proveedor?             @relation(fields: [proveedorId], references: [id])
+  movimientos   MovimientoInventario[]
+  lineasCompra  OrdenCompraLinea[]
+  receta        Receta?               @relation("RecetaDelProducto")
+  usadoEnRecetas RecetaMaterial[]     @relation("MaterialUsadoEnReceta")
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+
+  @@index([proveedorId])
+  @@index([tipo])
+}
+
+// Fila unica (id fijo "global") con ajustes del sistema que no ameritan su propia tabla.
+// Hoy solo guarda el margen de ganancia por defecto para calcular el PVP de Inventario.
+model Configuracion {
+  id               String   @id @default("global")
+  margenDefaultPct Decimal  @default(30) @db.Decimal(5, 2)
+  // Marca y plantilla de términos usados al generar el PDF de cotizaciones.
+  empresaNombre    String   @default("NETSEG SOLUTIONS")
+  empresaTagline   String   @default("Seguridad electrónica · Infraestructura de redes · Domótica")
+  empresaContacto  String   @default("info@netsegsolutions.ec")
+  empresaCiudad    String   @default("Guayaquil, Ecuador")
+  garantiaTexto    String   @default("Equipos electrónicos: 12 meses por defecto de fábrica según el fabricante. Instalación y mano de obra: 6 meses. No cubre daños por descargas atmosféricas, sobrevoltajes, manipulación de terceros o vandalismo.")
+  formaPagoTexto   String   @default("70% de anticipo a la aprobación de la oferta y 30% contra entrega del sistema funcionando. Precios en dólares americanos.")
+  requisitosTexto  String   @default("Espacio disponible en el tablero eléctrico para la acometida del sistema.\nAcceso al área de trabajo en horario laborable y espacio seguro para resguardo de materiales.\nCondiciones estructurales adecuadas para la instalación (muros, cerramiento, ductería según el caso).")
+  alcanceTexto     String   @default("Suministro de materiales, instalación, configuración, pruebas, capacitación y entrega de manuales. No incluye obra civil, acometidas eléctricas mayores ni permisos municipales, salvo que se indique explícitamente en esta cotización.")
+  updatedAt        DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Receta (lista de materiales / BOM) para productos compuestos: de qué
+// materiales, servicios y mano de obra se arma un producto terminado, y la
+// accion de "Producir" que descuenta materiales del stock y suma el
+// producto terminado.
+// ---------------------------------------------------------------------------
+
+model Receta {
+  id                 String   @id @default(cuid())
+  productoId         String   @unique
+  producto           ProductoInventario @relation("RecetaDelProducto", fields: [productoId], references: [id], onDelete: Cascade)
+  manoObraHoras      Decimal? @db.Decimal(10, 2)
+  manoObraTarifaHora Decimal? @db.Decimal(10, 2)
+  notas              String?
+  materiales         RecetaMaterial[]
+  servicios          RecetaServicio[]
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model RecetaMaterial {
+  id         String             @id @default(cuid())
+  recetaId   String
+  receta     Receta             @relation(fields: [recetaId], references: [id], onDelete: Cascade)
+  productoId String
+  producto   ProductoInventario @relation("MaterialUsadoEnReceta", fields: [productoId], references: [id])
+  cantidad   Decimal            @db.Decimal(10, 2)
+  orden      Int                @default(0)
+
+  @@index([recetaId])
+  @@index([productoId])
+}
+
+model RecetaServicio {
+  id          String    @id @default(cuid())
+  recetaId    String
+  receta      Receta    @relation(fields: [recetaId], references: [id], onDelete: Cascade)
+  servicioId  String?
+  servicio    Servicio? @relation(fields: [servicioId], references: [id])
+  descripcion String
+  costo       Decimal   @db.Decimal(10, 2)
+  orden       Int       @default(0)
+
+  @@index([recetaId])
+}
+
+enum TipoMovimientoInventario {
+  ENTRADA
+  SALIDA
+  AJUSTE
+}
+
+model MovimientoInventario {
+  id         String                   @id @default(cuid())
+  productoId String
+  producto   ProductoInventario       @relation(fields: [productoId], references: [id])
+  tipo       TipoMovimientoInventario
+  cantidad   Decimal                  @db.Decimal(10, 2)
+  motivo     String?
+  referencia String?
+  createdAt  DateTime                 @default(now())
+
+  @@index([productoId])
+}
+
+enum EstadoOrdenCompra {
+  BORRADOR
+  ENVIADA
+  RECIBIDA
+  CANCELADA
+}
+
+model OrdenCompra {
+  id          String            @id @default(cuid())
+  numero      String            @unique
+  proveedorId String
+  proveedor   Proveedor         @relation(fields: [proveedorId], references: [id])
+  estado      EstadoOrdenCompra @default(BORRADOR)
+  fecha       DateTime          @default(now())
+  notas       String?
+  lineas      OrdenCompraLinea[]
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([proveedorId])
+  @@index([estado])
+}
+
+model OrdenCompraLinea {
+  id            String             @id @default(cuid())
+  ordenCompraId String
+  ordenCompra   OrdenCompra        @relation(fields: [ordenCompraId], references: [id], onDelete: Cascade)
+  productoId    String
+  producto      ProductoInventario @relation(fields: [productoId], references: [id])
+  cantidad      Decimal            @db.Decimal(10, 2)
+  costoUnitario Decimal            @db.Decimal(10, 2)
+  orden         Int                @default(0)
+
+  @@index([ordenCompraId])
+}
+
+// ---------------------------------------------------------------------------
+// Facturación electrónica SRI
+// La estructura (numeración, clave de acceso, XML, líneas) queda completa.
+// Firmar con el certificado .p12 real y enviar al SRI es un paso manual
+// hasta que NetSeg tenga su certificado de firma electrónica — ver README.
+// ---------------------------------------------------------------------------
+
+enum EstadoFactura {
+  BORRADOR
+  GENERADA
+  ANULADA
+}
+
+model Factura {
+  id           String        @id @default(cuid())
+  numero       String        @unique
+  claveAcceso  String?       @unique
+  clienteId    String
+  cliente      Cliente       @relation(fields: [clienteId], references: [id])
+  cotizacionId String?       @unique
+  cotizacion   Cotizacion?   @relation(fields: [cotizacionId], references: [id])
+  fecha        DateTime      @default(now())
+  ivaPct       Decimal       @default(15) @db.Decimal(5, 2)
+  estado       EstadoFactura @default(BORRADOR)
+  xml          String?
+  notas        String?
+  lineas       FacturaLinea[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([clienteId])
+  @@index([estado])
+}
+
+model FacturaLinea {
+  id             String  @id @default(cuid())
+  facturaId      String
+  factura        Factura @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+  descripcion    String
+  cantidad       Decimal @db.Decimal(10, 2)
+  precioUnitario Decimal @db.Decimal(10, 2)
+  orden          Int     @default(0)
+
+  @@index([facturaId])
+}
+
+// ---------------------------------------------------------------------------
+// Nómina y RRHH
+// Herramienta de cálculo de apoyo (IESS personal/patronal, décimos).
+// El impuesto a la renta se deja editable: su tabla cambia cada año y debe
+// confirmarlo un contador, no se calcula automáticamente aquí.
+// ---------------------------------------------------------------------------
+
+enum EstadoEmpleado {
+  ACTIVO
+  INACTIVO
+}
+
+model Empleado {
+  id             String         @id @default(cuid())
+  nombres        String
+  apellidos      String
+  cedula         String         @unique
+  cargo          String
+  fechaIngreso   DateTime
+  salarioMensual Decimal        @db.Decimal(10, 2)
+  email          String?
+  telefono       String?
+  estado         EstadoEmpleado @default(ACTIVO)
+  rolesPago      RolPagos[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+}
+
+enum EstadoRolPagos {
+  BORRADOR
+  PAGADO
+}
+
+model RolPagos {
+  id                 String         @id @default(cuid())
+  empleadoId         String
+  empleado           Empleado       @relation(fields: [empleadoId], references: [id])
+  periodo            String
+  salarioMensual     Decimal        @db.Decimal(10, 2)
+  horasExtras        Decimal?       @db.Decimal(10, 2)
+  otrosIngresos      Decimal?       @db.Decimal(10, 2)
+  aportePersonalIess Decimal        @db.Decimal(10, 2)
+  aportePatronalIess Decimal        @db.Decimal(10, 2)
+  decimoTercero      Decimal        @db.Decimal(10, 2)
+  decimoCuarto       Decimal        @db.Decimal(10, 2)
+  impuestoRenta      Decimal        @default(0) @db.Decimal(10, 2)
+  otrosDescuentos    Decimal?       @db.Decimal(10, 2)
+  totalIngresos      Decimal        @db.Decimal(10, 2)
+  totalDescuentos    Decimal        @db.Decimal(10, 2)
+  liquidoRecibir     Decimal        @db.Decimal(10, 2)
+  estado             EstadoRolPagos @default(BORRADOR)
+  notas              String?
+  createdAt          DateTime       @default(now())
+
+  @@unique([empleadoId, periodo])
+  @@index([periodo])
+}
